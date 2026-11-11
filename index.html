@@ -18,7 +18,7 @@
 .reader{padding:16px;display:flex;flex-direction:column;min-height:720px}.reader h1{font-size:1.35rem;margin:0 0 5px}.sub{font-size:.9rem;color:var(--muted);margin-bottom:12px}
 .text{font-size:1.18rem;line-height:1.72;overflow:auto;max-height:55vh;padding-right:5px}.block{margin:0 0 13px;padding:8px 10px;border-radius:10px}.block:nth-child(2n){background:#f6f8fa}.sentence{padding:2px 3px;border-radius:6px;cursor:pointer}.sentence:hover{background:#edf5ff}.sentence.active{background:var(--read);box-shadow:0 0 0 2px #efd56c inset}.word.activeWord{background:var(--word);border-radius:4px;padding:0 1px}
 .controls{margin-top:auto;border-top:1px solid var(--line);padding-top:12px;display:grid;gap:9px}.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.speed{padding:9px;border:1px solid #bfd0df;border-radius:10px;background:#fff}.status{color:var(--muted);font-size:.9rem}.grow{flex:1}
-.dyslexic .text{font-size:1.3rem;line-height:1.92;letter-spacing:.055em;word-spacing:.12em}.loading{padding:40px;text-align:center;color:var(--muted)}
+.browserHelp{border-top:1px solid var(--line);padding-top:8px;font-size:.92rem}.browserHelp[hidden]{display:none!important}.browserHelp a.btn{display:inline-flex;align-items:center;text-decoration:none}.dyslexic .text{font-size:1.3rem;line-height:1.92;letter-spacing:.055em;word-spacing:.12em}.loading{padding:40px;text-align:center;color:var(--muted)}
 @media(max-width:900px){.layout{grid-template-columns:1fr;padding:7px}.pageStage{min-height:480px}.reader{min-height:auto}.text{max-height:none}.controls{position:sticky;bottom:0;background:#fff;padding:9px 0 4px}.top{align-items:flex-start}.toolbar{justify-content:flex-end}.bookline{font-size:.76rem}}
 </style>
 </head>
@@ -64,12 +64,17 @@
       <button class="btn" id="voicePreview" type="button">🔊 Posłuchaj głosu</button>
       <span class="status" id="voiceInfo" aria-live="polite"></span>
     </div>
+    <div class="row browserHelp" id="browserHelp" hidden>
+      <span class="status grow" id="browserHelpText">Jeśli lektor nie działa, otwórz podręcznik w pełnej przeglądarce Chrome, nie wewnątrz innej aplikacji.</span>
+      <a class="btn" id="chromeLaunch" href="intent://podrecznikiali.vercel.app/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=https%3A%2F%2Fpodrecznikiali.vercel.app%2F;end">Otwórz w Chrome</a>
+      <button class="btn" id="copyAddress" type="button">Kopiuj adres</button>
+    </div>
   </div>
 </section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const CONTENT_VERSION='166-20261111-mobile-speech-v4';
+const CONTENT_VERSION='166-20261111-android-browser-v5';
 const apiPath=p=>'/api/file?pathname='+encodeURIComponent(p)+'&v='+CONTENT_VERSION;
 let catalog=null,manifest=null,bookIndex=0,pageIndex=0,sentenceIndex=0,paused=false;
 let speechRun=0;
@@ -151,6 +156,11 @@ function stopSpeech(){
   activeUtterance=null;
   try{if('speechSynthesis' in window && typeof speechSynthesis.cancel==='function')speechSynthesis.cancel()}catch(_){}
 }
+function showBrowserHelp(message){
+  if(!/Android/i.test(navigator.userAgent||''))return;
+  $('browserHelp').hidden=false;
+  if(message)$('browserHelpText').textContent=message;
+}
 function voiceId(v){return v.voiceURI+"|"+v.name+"|"+v.lang}
 function chosenVoice(){
   return polishVoices.find(v=>voiceId(v)===selectedVoiceId)
@@ -159,7 +169,11 @@ function chosenVoice(){
     ||null;
 }
 function loadVoices(){
-  if(!("speechSynthesis" in window)){$("voiceInfo").textContent="Przeglądarka nie obsługuje lektora";return}
+  if(!("speechSynthesis" in window)){
+    $("voiceInfo").textContent="Ta przeglądarka nie obsługuje lektora";
+    showBrowserHelp('Odtwarzanie mowy jest niedostępne w tej przeglądarce. Otwórz podręcznik w aplikacji Chrome.');
+    return;
+  }
   try{polishVoices=(typeof speechSynthesis.getVoices==="function"?speechSynthesis.getVoices():[]).filter(v=>/^pl(?:-|$)/i.test(v.lang))}catch(_){polishVoices=[]}
   const select=$("voiceSelect");
   select.innerHTML='<option value="">Automatyczny (polski)</option>';
@@ -172,11 +186,13 @@ function loadVoices(){
   select.value=polishVoices.some(v=>voiceId(v)===selectedVoiceId)?selectedVoiceId:"";
   $("voiceInfo").textContent=polishVoices.length
     ? "Dostępne polskie głosy: "+polishVoices.length
-    : "Brak dodatkowych polskich głosów na tym urządzeniu";
+    : "Ta przeglądarka nie udostępnia listy polskich głosów";
+  if(!polishVoices.length)showBrowserHelp('Polski głos może być zainstalowany w telefonie, ale ta przeglądarka go nie udostępnia. Spróbuj otworzyć stronę bezpośrednio w Chrome.');
 }
 function speakUtterance(message, readNext=false){
   if(!('speechSynthesis' in window)||typeof SpeechSynthesisUtterance==='undefined'){
     updateStatus('Ten telefon lub przeglądarka nie obsługuje lektora.');
+    showBrowserHelp('Otwórz podręcznik w pełnej przeglądarce Chrome, ponieważ obecna nie obsługuje odtwarzania mowy.');
     return;
   }
   const run=speechRun;
@@ -212,11 +228,13 @@ function speakUtterance(message, readNext=false){
       activeUtterance=null;
       if(e.error==='interrupted'||e.error==='canceled')return;
       updateStatus('Błąd lektora: '+(e.error||'nieznany')+'. Spróbuj innego głosu lub przeglądarki.');
+      showBrowserHelp('Lektor nie uruchomił się w tej przeglądarce. Sprawdź podręcznik bezpośrednio w Chrome.');
     };
     speechSynthesis.speak(u);
     speechStartTimer=setTimeout(()=>{
       if(run===speechRun&&!started){
-        updateStatus('Telefon nie uruchomił lektora. Spróbuj wybrać głos polski i nacisnąć Czytaj ponownie.');
+        updateStatus('Telefon nie uruchomił lektora. Otwórz podręcznik bezpośrednio w Chrome.');
+        showBrowserHelp('Telefon nie odtwarza mowy w tej przeglądarce. Otwórz stronę w pełnej aplikacji Chrome.');
       }
     },4500);
   }catch(e){
@@ -267,6 +285,23 @@ function initSpeech(){
     else speechSynthesis.onvoiceschanged=loadVoices;
   }catch(_){$('voiceInfo').textContent='Nie udało się pobrać głosów, tekst pozostaje dostępny'}
 }
+$('copyAddress').onclick=async()=>{
+  const url='https://podrecznikiali.vercel.app/';
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(url);
+    }else{
+      const el=document.createElement('textarea');
+      el.value=url;el.style.position='fixed';el.style.opacity='0';
+      document.body.appendChild(el);el.select();
+      if(!document.execCommand('copy'))throw new Error('copy');
+      el.remove();
+    }
+    $('copyAddress').textContent='Skopiowano';
+  }catch(_){
+    $('browserHelpText').textContent='Otwórz Chrome i wpisz w pasku adresu: '+url;
+  }
+};
 $('dysBtn').onclick=()=>document.body.classList.toggle('dyslexic');
 function hold(id,fn){let t,l;const e=$(id);const start=x=>{x.preventDefault();t=setTimeout(()=>l=setInterval(fn,260),450)};const stop=()=>{clearTimeout(t);clearInterval(l)};e.addEventListener('pointerdown',start);['pointerup','pointerleave','pointercancel'].forEach(v=>e.addEventListener(v,stop))}
 hold('back10',()=>jumpTime(-10));hold('fwd10',()=>jumpTime(10));
