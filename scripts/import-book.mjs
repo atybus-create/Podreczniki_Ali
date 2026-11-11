@@ -1,135 +1,145 @@
-import { chromium } from 'playwright';
-import { put } from '@vercel/blob';
+import { put, get } from '@vercel/blob';
+import he from 'he';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const arg = (name, fallback='') => {
-  const i = process.argv.indexOf('--'+name);
-  return i >= 0 ? process.argv[i+1] : fallback;
-};
-
-const base = arg('base');
-const bookId = arg('book-id', 'book');
-const bookTitle = arg('title', bookId);
-const maxPages = Number(arg('max-pages', '240'));
-const startPage = Number(arg('start-page', '1'));
-const output = arg('output', '/tmp/book-import');
-const upload = arg('upload', 'false') === 'true';
-const token = process.env.BLOB_READ_WRITE_TOKEN;
-
-if (!base) throw new Error('Missing --base URL');
-if (upload && !token) throw new Error('BLOB_READ_WRITE_TOKEN is required for --upload true');
-
-await fs.mkdir(path.join(output,'pages'), {recursive:true});
-await fs.mkdir(path.join(output,'text'), {recursive:true});
-
-const browser = await chromium.launch({headless:true});
-const context = await browser.newContext({
-  viewport: {width: 1400, height: 1900},
-  deviceScaleFactor: 1,
-  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/157 Safari/537.36'
-});
-const page = await context.newPage();
-
-const pages = [];
-let consecutiveFailures = 0;
-let firstSuccess = false;
-
-function pageUrl(n) {
-  const sep = base.endsWith('/') ? '' : '/';
-  return `${base}${sep}files/basic-html/page${n}.html`;
+function cleanText(html) {
+  const m = html.match(/<pre[^>]*>\s*<code>([\s\S]*?)<\/code>\s*<\/pre>/i);
+  const src = m ? m[1] : html.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ');
+  return he.decode(src.replace(/<br\s*\/?\s*>/gi,'\n').replace(/<[^>]+>/g,' '))
+    .replace(/\r/g,'')
+    .replace(/[ \t]+\n/g,'\n')
+    .replace(/\n[ \t]+/g,'\n')
+    .replace(/[ \t]{2,}/g,' ')
+    .replace(/\n{3,}/g,'\n\n')
+    .trim();
 }
-function p3(n){ return String(n).padStart(3,'0'); }
 
-for (let n=startPage; n<=maxPages; n++) {
-  const url = pageUrl(n);
-  try {
-    const response = await page.goto(url, {waitUntil:'domcontentloaded', timeout:45000, referer: base});
-    const status = response?.status() ?? 0;
-    if (!response || status >= 400) {
-      consecutiveFailures++;
-      console.log(`MISS page ${n}: HTTP ${status}`);
-      if (firstSuccess && consecutiveFailures >= 4) break;
-      continue;
-    }
-    await page.waitForLoadState('networkidle', {timeout:10000}).catch(()=>{});
-    await page.waitForTimeout(500);
+async function fetchOk(url) {
+  const res = await fetch(url, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/157 Safari/537.36',
+      'accept-language': 'pl-PL,pl;q=0.9,en;q=0.8'
+    },
+    redirect: 'follow'
+  });
+  return res;
+}
 
-    const data = await page.evaluate(() => {
-      const clean = (s) => (s || '').replace(/\u00a0/g,' ').replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
-      const raw = clean(document.body?.innerText || '');
-      const lines = raw.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-      return {
-        title: document.title || '',
-        text: raw,
-        lines,
-        width: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0),
-        height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0)
-      };
-    });
+export async function importBook({ id, title, sourceBase, maxPages=240, output='/tmp/book-import', upload=true, force=false }) {
+  const prefix = `books/${id}`;
+  if (upload && !force) {
+    try {
+      const existing = await get(`${prefix}/manifest.json`, { access:'private' });
+      if (existing?.statusCode === 200) {
+        console.log(`SKIP ${id}: manifest already exists`);
+        return { skipped:true, id };
+      }
+    } catch {}
+  }
 
-    if (!data.text && n > 3) {
-      consecutiveFailures++;
-      console.log(`EMPTY page ${n}`);
-      if (firstSuccess && consecutiveFailures >= 4) break;
-      continue;
-    }
+  const local = path.join(output, id);
+  await fs.mkdir(path.join(local,'pages'), {recursive:true});
+  await fs.mkdir(path.join(local,'text'), {recursive:true});
 
-    firstSuccess = true;
-    consecutiveFailures = 0;
-    const id = p3(n);
-    const imagePath = path.join(output,'pages',`${id}.jpg`);
-    const jsonPath = path.join(output,'text',`${id}.json`);
+  const candidates = Array.from({length:maxPages},(_,i)=>i+1);
+  const successes = [];
+  let cursor=0;
+  const workers = 8;
 
-    await page.screenshot({path:imagePath, fullPage:true, type:'jpeg', quality:88});
-    const json = {
-      bookId,
-      sourcePage: n,
-      sourceUrl: url,
-      title: data.title,
-      text: data.text,
-      lines: data.lines
+  async function one(n) {
+    const imageUrl = `${sourceBase}/files/mobile/${n}.jpg`;
+    const htmlUrl = `${sourceBase}/files/basic-html/page${n}.html`;
+    const [ir, hr] = await Promise.all([fetchOk(imageUrl), fetchOk(htmlUrl)]);
+    if (!ir.ok || !hr.ok) return null;
+
+    const [img, html] = await Promise.all([
+      Buffer.from(await ir.arrayBuffer()),
+      hr.text()
+    ]);
+    if (img.length < 5000 || html.length < 500) return null;
+
+    const text = cleanText(html);
+    const id3 = String(n).padStart(3,'0');
+    const pageData = {
+      bookId:id,
+      sourcePage:n,
+      title:(text.split('\n').find(Boolean)||`Strona ${n}`).slice(0,160),
+      text,
+      paragraphs:text.split(/\n\s*\n/).map(x=>x.trim()).filter(Boolean)
     };
-    await fs.writeFile(jsonPath, JSON.stringify(json,null,2), 'utf8');
+
+    await fs.writeFile(path.join(local,'pages',`${id3}.jpg`),img);
+    await fs.writeFile(path.join(local,'text',`${id3}.json`),JSON.stringify(pageData,null,2),'utf8');
 
     if (upload) {
-      const image = await fs.readFile(imagePath);
-      await put(`books/${bookId}/pages/${id}.jpg`, image, {
-        access:'private', token, addRandomSuffix:false, allowOverwrite:true, contentType:'image/jpeg'
-      });
-      await put(`books/${bookId}/text/${id}.json`, JSON.stringify(json), {
-        access:'private', token, addRandomSuffix:false, allowOverwrite:true, contentType:'application/json'
-      });
+      await Promise.all([
+        put(`${prefix}/pages/${id3}.jpg`, img, {
+          access:'private', addRandomSuffix:false, allowOverwrite:true, contentType:'image/jpeg'
+        }),
+        put(`${prefix}/text/${id3}.json`, JSON.stringify(pageData), {
+          access:'private', addRandomSuffix:false, allowOverwrite:true, contentType:'application/json'
+        })
+      ]);
     }
-    pages.push({page:n, id, image:`pages/${id}.jpg`, text:`text/${id}.json`});
-    console.log(`OK page ${n} (${data.text.length} chars, ${data.width}x${data.height})`);
-  } catch (e) {
-    consecutiveFailures++;
-    console.log(`ERR page ${n}: ${e.message}`);
-    if (firstSuccess && consecutiveFailures >= 4) break;
+    console.log(`OK ${id} page ${n}: ${img.length} bytes, ${text.length} chars`);
+    return {page:n,id:id3};
   }
+
+  async function worker() {
+    while (true) {
+      const i=cursor++;
+      if (i>=candidates.length) return;
+      const n=candidates[i];
+      try {
+        const result=await one(n);
+        if (result) successes.push(result);
+      } catch(e) {
+        console.log(`ERR ${id} page ${n}: ${e.message}`);
+      }
+    }
+  }
+  await Promise.all(Array.from({length:workers},worker));
+
+  successes.sort((a,b)=>a.page-b.page);
+  if (!successes.length) throw new Error(`No pages imported for ${id}`);
+
+  // Keep the continuous run from the first page and stop at the first material gap.
+  const continuous=[];
+  let expected=successes[0].page;
+  for(const p of successes){
+    if(p.page!==expected) break;
+    continuous.push(p);
+    expected++;
+  }
+
+  const manifest={
+    id,title,sourceBase,
+    importedAt:new Date().toISOString(),
+    pageCount:continuous.length,
+    firstPage:continuous[0].page,
+    lastPage:continuous.at(-1).page,
+    pages:continuous
+  };
+  await fs.writeFile(path.join(local,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
+  if(upload){
+    await put(`${prefix}/manifest.json`,JSON.stringify(manifest),{
+      access:'private',addRandomSuffix:false,allowOverwrite:true,contentType:'application/json'
+    });
+  }
+  console.log(`DONE ${id}: ${manifest.pageCount} pages (${manifest.firstPage}-${manifest.lastPage})`);
+  return manifest;
 }
 
-await browser.close();
-
-if (!pages.length) throw new Error('No pages imported');
-
-const manifest = {
-  id: bookId,
-  title: bookTitle,
-  sourceBase: base,
-  importedAt: new Date().toISOString(),
-  pageCount: pages.length,
-  firstPage: pages[0].page,
-  lastPage: pages.at(-1).page,
-  pages
-};
-await fs.writeFile(path.join(output,'manifest.json'), JSON.stringify(manifest,null,2),'utf8');
-
-if (upload) {
-  await put(`books/${bookId}/manifest.json`, JSON.stringify(manifest), {
-    access:'private', token, addRandomSuffix:false, allowOverwrite:true, contentType:'application/json'
+if(import.meta.url===`file://${process.argv[1]}`){
+  const a=(k,d='')=>{const i=process.argv.indexOf(`--${k}`);return i>=0?process.argv[i+1]:d};
+  await importBook({
+    id:a('book-id','book'),
+    title:a('title',a('book-id','book')),
+    sourceBase:a('base'),
+    maxPages:Number(a('max-pages','240')),
+    output:a('output','/tmp/book-import'),
+    upload:a('upload','false')==='true',
+    force:a('force','false')==='true'
   });
 }
-
-console.log(JSON.stringify({ok:true, bookId, pageCount:pages.length, firstPage:manifest.firstPage, lastPage:manifest.lastPage, output}, null, 2));
