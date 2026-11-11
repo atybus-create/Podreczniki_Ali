@@ -226,7 +226,11 @@ function speakUtterance(message, readNext=false){
 }
 function speakCurrent(continuation=false){
   if(!state.sentences.length){updateStatus('Brak tekstu do czytania');return}
-  if(!continuation)stopSpeech();
+  if(!continuation){
+    const synth=('speechSynthesis' in window)?speechSynthesis:null;
+    if(activeUtterance||(synth&&(synth.speaking||synth.pending||synth.paused)))stopSpeech();
+    else speechRun++;
+  }
   paused=false;
   markSentence();
   speakUtterance(state.sentences[sentenceIndex],true);
