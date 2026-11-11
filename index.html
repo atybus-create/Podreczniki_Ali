@@ -69,10 +69,12 @@
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const CONTENT_VERSION='166-20261111-mobile-recovery-v3';
+const CONTENT_VERSION='166-20261111-mobile-speech-v4';
 const apiPath=p=>'/api/file?pathname='+encodeURIComponent(p)+'&v='+CONTENT_VERSION;
 let catalog=null,manifest=null,bookIndex=0,pageIndex=0,sentenceIndex=0,paused=false;
 let speechRun=0;
+let activeUtterance=null;
+let speechStartTimer=null;
 const VOICE_KEY="podreczniki-ali-pl-voice";
 let selectedVoiceId="";
 try{selectedVoiceId=localStorage.getItem(VOICE_KEY)||""}catch(_){}
@@ -145,10 +147,17 @@ function markWord(charIndex){
 }
 function stopSpeech(){
   speechRun++;
+  if(speechStartTimer){clearTimeout(speechStartTimer);speechStartTimer=null}
+  activeUtterance=null;
   try{if('speechSynthesis' in window && typeof speechSynthesis.cancel==='function')speechSynthesis.cancel()}catch(_){}
 }
 function voiceId(v){return v.voiceURI+"|"+v.name+"|"+v.lang}
-function chosenVoice(){return polishVoices.find(v=>voiceId(v)===selectedVoiceId)||null}
+function chosenVoice(){
+  return polishVoices.find(v=>voiceId(v)===selectedVoiceId)
+    ||polishVoices.find(v=>v.default)
+    ||polishVoices[0]
+    ||null;
+}
 function loadVoices(){
   if(!("speechSynthesis" in window)){$("voiceInfo").textContent="Przeglądarka nie obsługuje lektora";return}
   try{polishVoices=(typeof speechSynthesis.getVoices==="function"?speechSynthesis.getVoices():[]).filter(v=>/^pl(?:-|$)/i.test(v.lang))}catch(_){polishVoices=[]}
@@ -165,17 +174,62 @@ function loadVoices(){
     ? "Dostępne polskie głosy: "+polishVoices.length
     : "Brak dodatkowych polskich głosów na tym urządzeniu";
 }
-function speakCurrent(){
-  if(!state.sentences.length)return;
-  if(!('speechSynthesis' in window)||typeof SpeechSynthesisUtterance==='undefined'){updateStatus('Lektor niedostępny na tym urządzeniu. Tekst pozostaje dostępny.');return}
-  stopSpeech();const run=speechRun;paused=false;markSentence();
-  const u=new SpeechSynthesisUtterance(state.sentences[sentenceIndex]);u.lang='pl-PL';u.rate=+$('speed').value;
-  const voice=chosenVoice();if(voice)u.voice=voice;
-  u.onstart=()=>{if(run===speechRun)updateStatus(`Czytam zdanie ${sentenceIndex+1} z ${state.sentences.length}`)};
-  u.onboundary=e=>{if(run===speechRun&&e.name==='word')markWord(e.charIndex)};
-  u.onend=()=>{if(run!==speechRun)return;document.querySelectorAll('.word').forEach(e=>e.classList.remove('activeWord'));if(!paused&&sentenceIndex<state.sentences.length-1){sentenceIndex++;speakCurrent()}else updateStatus('Koniec strony')};
-  u.onerror=()=>{if(run===speechRun)updateStatus('Nie udało się odtworzyć głosu. Wybierz inny lektor.')};
-  speechSynthesis.speak(u);
+function speakUtterance(message, readNext=false){
+  if(!('speechSynthesis' in window)||typeof SpeechSynthesisUtterance==='undefined'){
+    updateStatus('Ten telefon lub przeglądarka nie obsługuje lektora.');
+    return;
+  }
+  const run=speechRun;
+  let u;
+  try{
+    u=new SpeechSynthesisUtterance(message);
+    u.lang='pl-PL';
+    u.rate=+$('speed').value;
+    const voice=chosenVoice();
+    if(voice)u.voice=voice;
+    activeUtterance=u;
+    let started=false;
+    u.onstart=()=>{
+      if(run!==speechRun)return;
+      started=true;
+      if(speechStartTimer){clearTimeout(speechStartTimer);speechStartTimer=null}
+      updateStatus('Czytam zdanie '+(sentenceIndex+1)+' z '+state.sentences.length);
+    };
+    u.onboundary=e=>{if(run===speechRun&&e.name==='word')markWord(e.charIndex)};
+    u.onend=()=>{
+      if(run!==speechRun)return;
+      if(speechStartTimer){clearTimeout(speechStartTimer);speechStartTimer=null}
+      activeUtterance=null;
+      document.querySelectorAll('.word').forEach(e=>e.classList.remove('activeWord'));
+      if(readNext&&!paused&&sentenceIndex<state.sentences.length-1){
+        sentenceIndex++;
+        speakCurrent(true);
+      }else updateStatus(readNext?'Koniec strony':'Odsłuch zakończony');
+    };
+    u.onerror=e=>{
+      if(run!==speechRun)return;
+      if(speechStartTimer){clearTimeout(speechStartTimer);speechStartTimer=null}
+      activeUtterance=null;
+      if(e.error==='interrupted'||e.error==='canceled')return;
+      updateStatus('Błąd lektora: '+(e.error||'nieznany')+'. Spróbuj innego głosu lub przeglądarki.');
+    };
+    speechSynthesis.speak(u);
+    speechStartTimer=setTimeout(()=>{
+      if(run===speechRun&&!started){
+        updateStatus('Telefon nie uruchomił lektora. Spróbuj wybrać głos polski i nacisnąć Czytaj ponownie.');
+      }
+    },4500);
+  }catch(e){
+    activeUtterance=null;
+    updateStatus('Nie udało się uruchomić lektora: '+(e.message||'błąd przeglądarki'));
+  }
+}
+function speakCurrent(continuation=false){
+  if(!state.sentences.length){updateStatus('Brak tekstu do czytania');return}
+  if(!continuation)stopSpeech();
+  paused=false;
+  markSentence();
+  speakUtterance(state.sentences[sentenceIndex],true);
 }
 function jumpSentence(d){sentenceIndex=Math.max(0,Math.min(state.sentences.length-1,sentenceIndex+d));markSentence();speakCurrent()}
 function sentenceSeconds(s){return Math.max(2,s.split(/\s+/).length/(2.6*+$('speed').value))}
@@ -195,15 +249,10 @@ $('voiceSelect').onchange=()=>{
   if(wasSpeaking)speakCurrent();else updateStatus('Wybrano głos lektora');
 };
 $('voicePreview').onclick=()=>{
-  if(!('speechSynthesis' in window)||typeof SpeechSynthesisUtterance==='undefined'){updateStatus('Lektor niedostępny na tym urządzeniu');return}
-  stopSpeech();paused=false;updateStatus('Odsłuch próbny');
-  const run=speechRun;
-  const sample=new SpeechSynthesisUtterance('Witaj! Posłuchaj, jak czytam podręcznik do geografii. Odkrywajmy razem świat.');
-  sample.lang='pl-PL';sample.rate=+$('speed').value;
-  const voice=chosenVoice();if(voice)sample.voice=voice;
-  sample.onend=()=>{if(run===speechRun)updateStatus('Odsłuch zakończony')};
-  sample.onerror=()=>{if(run===speechRun)updateStatus('Nie udało się odtworzyć próbki')};
-  speechSynthesis.speak(sample);
+  stopSpeech();
+  paused=false;
+  updateStatus('Uruchamiam próbkę lektora…');
+  speakUtterance('Witaj! Posłuchaj, jak czytam podręcznik do geografii. Odkrywajmy razem świat.',false);
 };
 // Inicjalizacja mowy nigdy nie może blokować odczytu podręcznika.
 function initSpeech(){
