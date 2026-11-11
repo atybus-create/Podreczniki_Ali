@@ -58,6 +58,12 @@
       <label>Tempo <select class="speed" id="speed"><option value=".7">0,7×</option><option value=".85">0,85×</option><option value="1" selected>1×</option><option value="1.15">1,15×</option><option value="1.3">1,3×</option><option value="1.5">1,5×</option></select></label>
       <span class="status grow" id="status">Gotowe</span>
     </div>
+    <div class="row">
+      <label for="voiceSelect">Lektor</label>
+      <select class="speed grow" id="voiceSelect" aria-label="Wybierz głos lektora"><option value="">Automatyczny (polski)</option></select>
+      <button class="btn" id="voicePreview" type="button">🔊 Posłuchaj głosu</button>
+      <span class="status" id="voiceInfo" aria-live="polite"></span>
+    </div>
   </div>
 </section>
 </main>
@@ -66,6 +72,11 @@ const $=id=>document.getElementById(id);
 const CONTENT_VERSION='166-20261111-repl8-v2';
 const apiPath=p=>'/api/file?pathname='+encodeURIComponent(p)+'&v='+CONTENT_VERSION;
 let catalog=null,manifest=null,bookIndex=0,pageIndex=0,sentenceIndex=0,paused=false;
+let speechRun=0;
+const VOICE_KEY="podreczniki-ali-pl-voice";
+let selectedVoiceId="";
+try{selectedVoiceId=localStorage.getItem(VOICE_KEY)||""}catch(_){}
+let polishVoices=[];
 const state={sentences:[],meta:[]};
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function splitSentences(t){return (t.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[t]).map(x=>x.trim()).filter(Boolean)}
@@ -83,7 +94,7 @@ async function init(){
   }
 }
 async function loadBook(i){
-  speechSynthesis.cancel();bookIndex=i;pageIndex=0;
+  stopSpeech();bookIndex=i;pageIndex=0;
   const b=catalog.books[i];
   manifest=await json(b.manifest);
   $('bookLine').textContent=`${b.title} · ${manifest.pageCount} stron`;
@@ -92,7 +103,7 @@ async function loadBook(i){
 }
 async function loadPage(i){
   if(!manifest)return;
-  speechSynthesis.cancel();paused=false;sentenceIndex=0;
+  stopSpeech();paused=false;sentenceIndex=0;
   pageIndex=Math.max(0,Math.min(manifest.pages.length-1,i));
   const p=manifest.pages[pageIndex];
   $('pageInput').value=pageIndex+1;
@@ -132,12 +143,37 @@ function markWord(charIndex){
   sent.querySelectorAll('.word').forEach(e=>e.classList.remove('activeWord'));
   let pos=0;for(const w of sent.querySelectorAll('.word')){const t=w.textContent;if(charIndex>=pos&&charIndex<=pos+t.length){w.classList.add('activeWord');break}pos+=t.length+1}
 }
+function stopSpeech(){
+  speechRun++;
+  speechSynthesis.cancel();
+}
+function voiceId(v){return v.voiceURI+"|"+v.name+"|"+v.lang}
+function chosenVoice(){return polishVoices.find(v=>voiceId(v)===selectedVoiceId)||null}
+function loadVoices(){
+  if(!("speechSynthesis" in window)){$("voiceInfo").textContent="Przeglądarka nie obsługuje lektora";return}
+  polishVoices=speechSynthesis.getVoices().filter(v=>/^pl(?:-|$)/i.test(v.lang));
+  const select=$("voiceSelect");
+  select.innerHTML='<option value="">Automatyczny (polski)</option>';
+  polishVoices.forEach(v=>{
+    const option=document.createElement("option");
+    option.value=voiceId(v);
+    option.textContent=v.name+(v.localService?" (na urządzeniu)":"");
+    select.appendChild(option);
+  });
+  select.value=polishVoices.some(v=>voiceId(v)===selectedVoiceId)?selectedVoiceId:"";
+  $("voiceInfo").textContent=polishVoices.length
+    ? "Dostępne polskie głosy: "+polishVoices.length
+    : "Brak dodatkowych polskich głosów na tym urządzeniu";
+}
 function speakCurrent(){
-  if(!state.sentences.length)return;speechSynthesis.cancel();paused=false;markSentence();
+  if(!state.sentences.length)return;
+  stopSpeech();const run=speechRun;paused=false;markSentence();
   const u=new SpeechSynthesisUtterance(state.sentences[sentenceIndex]);u.lang='pl-PL';u.rate=+$('speed').value;
-  u.onstart=()=>updateStatus(`Czytam zdanie ${sentenceIndex+1} z ${state.sentences.length}`);
-  u.onboundary=e=>{if(e.name==='word')markWord(e.charIndex)};
-  u.onend=()=>{document.querySelectorAll('.word').forEach(e=>e.classList.remove('activeWord'));if(!paused&&sentenceIndex<state.sentences.length-1){sentenceIndex++;speakCurrent()}else updateStatus('Koniec strony')};
+  const voice=chosenVoice();if(voice)u.voice=voice;
+  u.onstart=()=>{if(run===speechRun)updateStatus(`Czytam zdanie ${sentenceIndex+1} z ${state.sentences.length}`)};
+  u.onboundary=e=>{if(run===speechRun&&e.name==='word')markWord(e.charIndex)};
+  u.onend=()=>{if(run!==speechRun)return;document.querySelectorAll('.word').forEach(e=>e.classList.remove('activeWord'));if(!paused&&sentenceIndex<state.sentences.length-1){sentenceIndex++;speakCurrent()}else updateStatus('Koniec strony')};
+  u.onerror=()=>{if(run===speechRun)updateStatus('Nie udało się odtworzyć głosu. Wybierz inny lektor.')};
   speechSynthesis.speak(u);
 }
 function jumpSentence(d){sentenceIndex=Math.max(0,Math.min(state.sentences.length-1,sentenceIndex+d));markSentence();speakCurrent()}
@@ -149,10 +185,29 @@ $('pageInput').onchange=()=>loadPage((+$('pageInput').value||1)-1);
 $('play').onclick=()=>speechSynthesis.paused?speechSynthesis.resume():speakCurrent();
 $('pause').onclick=()=>{if(speechSynthesis.speaking&&!speechSynthesis.paused){speechSynthesis.pause();paused=true;updateStatus('Pauza')}else if(speechSynthesis.paused){speechSynthesis.resume();paused=false;updateStatus('Czytam')}};
 $('prevSentence').onclick=()=>jumpSentence(-1);$('nextSentence').onclick=()=>jumpSentence(1);$('back10').onclick=()=>jumpTime(-10);$('fwd10').onclick=()=>jumpTime(10);$('repeatBlock').onclick=repeatBlock;
-$('speed').onchange=()=>{if(speechSynthesis.speaking)speakCurrent()};$('dysBtn').onclick=()=>document.body.classList.toggle('dyslexic');
+$('speed').onchange=()=>{if(speechSynthesis.speaking)speakCurrent()};
+$('voiceSelect').onchange=()=>{
+  selectedVoiceId=$('voiceSelect').value;
+  try{if(selectedVoiceId)localStorage.setItem(VOICE_KEY,selectedVoiceId);else localStorage.removeItem(VOICE_KEY)}catch(_){}
+  const wasSpeaking=speechSynthesis.speaking;
+  stopSpeech();paused=false;
+  if(wasSpeaking)speakCurrent();else updateStatus('Wybrano głos lektora');
+};
+$('voicePreview').onclick=()=>{
+  stopSpeech();paused=false;updateStatus('Odsłuch próbny');
+  const run=speechRun;
+  const sample=new SpeechSynthesisUtterance('Witaj! Posłuchaj, jak czytam podręcznik do geografii. Odkrywajmy razem świat.');
+  sample.lang='pl-PL';sample.rate=+$('speed').value;
+  const voice=chosenVoice();if(voice)sample.voice=voice;
+  sample.onend=()=>{if(run===speechRun)updateStatus('Odsłuch zakończony')};
+  sample.onerror=()=>{if(run===speechRun)updateStatus('Nie udało się odtworzyć próbki')};
+  speechSynthesis.speak(sample);
+};
+if('speechSynthesis' in window){loadVoices();speechSynthesis.addEventListener('voiceschanged',loadVoices)}
+$('dysBtn').onclick=()=>document.body.classList.toggle('dyslexic');
 function hold(id,fn){let t,l;const e=$(id);const start=x=>{x.preventDefault();t=setTimeout(()=>l=setInterval(fn,260),450)};const stop=()=>{clearTimeout(t);clearInterval(l)};e.addEventListener('pointerdown',start);['pointerup','pointerleave','pointercancel'].forEach(v=>e.addEventListener(v,stop))}
 hold('back10',()=>jumpTime(-10));hold('fwd10',()=>jumpTime(10));
-window.addEventListener('beforeunload',()=>speechSynthesis.cancel());init();
+window.addEventListener('beforeunload',stopSpeech);init();
 </script>
 </body>
 </html>
