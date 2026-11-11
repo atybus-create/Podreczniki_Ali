@@ -18,7 +18,7 @@
 .reader{padding:16px;display:flex;flex-direction:column;min-height:720px}.reader h1{font-size:1.35rem;margin:0 0 5px}.sub{font-size:.9rem;color:var(--muted);margin-bottom:12px}
 .text{font-size:1.18rem;line-height:1.72;overflow:auto;max-height:55vh;padding-right:5px}.block{margin:0 0 13px;padding:8px 10px;border-radius:10px}.block:nth-child(2n){background:#f6f8fa}.sentence{padding:2px 3px;border-radius:6px;cursor:pointer}.sentence:hover{background:#edf5ff}.sentence.active{background:var(--read);box-shadow:0 0 0 2px #efd56c inset}.word.activeWord{background:var(--word);border-radius:4px;padding:0 1px}
 .controls{margin-top:auto;border-top:1px solid var(--line);padding-top:12px;display:grid;gap:9px}.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.speed{padding:9px;border:1px solid #bfd0df;border-radius:10px;background:#fff}.status{color:var(--muted);font-size:.9rem}.grow{flex:1}
-.browserHelp{border-top:1px solid var(--line);padding-top:8px;font-size:.92rem}.browserHelp[hidden]{display:none!important}.browserHelp a.btn{display:inline-flex;align-items:center;text-decoration:none}.dyslexic .text{font-size:1.3rem;line-height:1.92;letter-spacing:.055em;word-spacing:.12em}.loading{padding:40px;text-align:center;color:var(--muted)}
+.speechDiagnostic{display:grid;gap:6px;margin-top:8px;padding:12px;border:1px solid #d9a86e;background:#fff9ef;border-radius:10px}.speechDiagnostic[hidden]{display:none}.speechDiagnostic strong{font-weight:700}.speechDiagnostic code{font-weight:700}.browserHelp{border-top:1px solid var(--line);padding-top:8px;font-size:.92rem}.browserHelp[hidden]{display:none!important}.browserHelp a.btn{display:inline-flex;align-items:center;text-decoration:none}.dyslexic .text{font-size:1.3rem;line-height:1.92;letter-spacing:.055em;word-spacing:.12em}.loading{padding:40px;text-align:center;color:var(--muted)}
 @media(max-width:900px){.layout{grid-template-columns:1fr;padding:7px}.pageStage{min-height:480px}.reader{min-height:auto}.text{max-height:none}.controls{position:sticky;bottom:0;background:#fff;padding:9px 0 4px}.top{align-items:flex-start}.toolbar{justify-content:flex-end}.bookline{font-size:.76rem}}
 </style>
 </head>
@@ -64,6 +64,11 @@
       <button class="btn" id="voicePreview" type="button">🔊 Posłuchaj głosu</button>
       <span class="status" id="voiceInfo" aria-live="polite"></span>
     </div>
+    <div id="speechDiagnostic" class="speechDiagnostic" hidden role="status" aria-live="polite">
+      <strong id="speechErrorTitle">Problem z odtwarzaniem lektora</strong>
+      <div id="speechErrorDetail">Kod błędu: —</div>
+      <div class="row"><button class="btn" id="soundTest" type="button">Test dźwięku telefonu</button><span class="status" id="soundTestStatus"></span></div>
+    </div>
     <div class="row browserHelp" id="browserHelp" hidden>
       <span class="status grow" id="browserHelpText">Jeśli lektor nie działa, otwórz podręcznik w pełnej przeglądarce Chrome, nie wewnątrz innej aplikacji.</span>
       <a class="btn" id="chromeLaunch" href="intent://podrecznikiali.vercel.app/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=https%3A%2F%2Fpodrecznikiali.vercel.app%2F;end">Otwórz w Chrome</a>
@@ -74,7 +79,7 @@
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const CONTENT_VERSION='166-20261111-android-browser-v5';
+const CONTENT_VERSION='166-20261111-speech-diagnostics-v6';
 const apiPath=p=>'/api/file?pathname='+encodeURIComponent(p)+'&v='+CONTENT_VERSION;
 let catalog=null,manifest=null,bookIndex=0,pageIndex=0,sentenceIndex=0,paused=false;
 let speechRun=0;
@@ -156,6 +161,23 @@ function stopSpeech(){
   activeUtterance=null;
   try{if('speechSynthesis' in window && typeof speechSynthesis.cancel==='function')speechSynthesis.cancel()}catch(_){}
 }
+function showSpeechError(code){
+  const reason=String(code||'brak-kodu');
+  $('speechDiagnostic').hidden=false;
+  $('speechErrorTitle').textContent='Błąd lektora: '+reason;
+  const explanations={
+    'language-unavailable':'Przeglądarka nie znajduje głosu dla języka polskiego.',
+    'voice-unavailable':'Wybrany głos nie jest dostępny.',
+    'synthesis-unavailable':'Przeglądarka nie ma dostępnego silnika syntezy mowy.',
+    'synthesis-failed':'Silnik syntezy mowy telefonu zwrócił błąd.',
+    'not-allowed':'Przeglądarka zablokowała uruchomienie mowy.',
+    'network':'Silnik mowy nie może połączyć się z potrzebną usługą.',
+    'audio-busy':'Urządzenie audio jest zajęte.',
+    'audio-hardware':'Przeglądarka nie wykrywa wyjścia dźwięku.',
+    'text-too-long':'Tekst zdania jest zbyt długi dla lektora.'
+  };
+  $('speechErrorDetail').textContent=(explanations[reason]||'Nieznany błąd przeglądarki.')+' Podaj dokładny kod z nagłówka, żeby rozpoznać przyczynę.';
+}
 function showBrowserHelp(message){
   if(!/Android/i.test(navigator.userAgent||''))return;
   $('browserHelp').hidden=false;
@@ -227,13 +249,16 @@ function speakUtterance(message, readNext=false){
       if(speechStartTimer){clearTimeout(speechStartTimer);speechStartTimer=null}
       activeUtterance=null;
       if(e.error==='interrupted'||e.error==='canceled')return;
-      updateStatus('Błąd lektora: '+(e.error||'nieznany')+'. Spróbuj innego głosu lub przeglądarki.');
+      const code=e.error||'brak-kodu';
+      updateStatus('Błąd lektora: '+code);
+      showSpeechError(code);
       showBrowserHelp('Lektor nie uruchomił się w tej przeglądarce. Sprawdź podręcznik bezpośrednio w Chrome.');
     };
     speechSynthesis.speak(u);
     speechStartTimer=setTimeout(()=>{
       if(run===speechRun&&!started){
-        updateStatus('Telefon nie uruchomił lektora. Otwórz podręcznik bezpośrednio w Chrome.');
+        updateStatus('Lektor nie rozpoczyna odtwarzania.');
+        showSpeechError('brak-startu');
         showBrowserHelp('Telefon nie odtwarza mowy w tej przeglądarce. Otwórz stronę w pełnej aplikacji Chrome.');
       }
     },4500);
@@ -285,6 +310,22 @@ function initSpeech(){
     else speechSynthesis.onvoiceschanged=loadVoices;
   }catch(_){$('voiceInfo').textContent='Nie udało się pobrać głosów, tekst pozostaje dostępny'}
 }
+$('soundTest').onclick=async()=>{
+  $('soundTestStatus').textContent='Sprawdzam głośnik…';
+  try{
+    const AudioCtx=window.AudioContext||window.webkitAudioContext;
+    if(!AudioCtx)throw new Error('Web Audio niedostępne');
+    const ctx=new AudioCtx();
+    await ctx.resume();
+    const o=ctx.createOscillator();
+    const g=ctx.createGain();
+    o.type='sine';o.frequency.value=523.25;g.gain.value=0.09;
+    o.connect(g);g.connect(ctx.destination);
+    o.start();o.stop(ctx.currentTime+0.45);
+    o.onended=()=>{ctx.close().catch(()=>{})};
+    $('soundTestStatus').textContent='Odtworzono krótki sygnał. Czy było go słychać?';
+  }catch(e){$('soundTestStatus').textContent='Błąd testu dźwięku: '+(e.message||'niedostępny')}
+};
 $('copyAddress').onclick=async()=>{
   const url='https://podrecznikiali.vercel.app/';
   try{
