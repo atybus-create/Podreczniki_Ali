@@ -3,6 +3,9 @@ import { put } from '@vercel/blob';
 import { importBook } from './import-book.mjs';
 
 const cfg=JSON.parse(await fs.readFile(new URL('../books.config.json',import.meta.url),'utf8'));
+await fs.rm(new URL('../public',import.meta.url),{recursive:true,force:true});
+await fs.mkdir(new URL('../public',import.meta.url),{recursive:true});
+await fs.copyFile(new URL('../index.html',import.meta.url),new URL('../public/index.html',import.meta.url));
 const catalog={generatedAt:new Date().toISOString(),books:[]};
 
 for(const b of cfg.books){
