@@ -4,9 +4,10 @@
   "type": "module",
   "dependencies": {
     "@vercel/blob": "^2.0.0",
-    "playwright": "^1.56.0"
+    "he": "^1.2.0"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
     "import:book": "node scripts/import-book.mjs"
   }
 }
