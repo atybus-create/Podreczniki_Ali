@@ -69,7 +69,7 @@
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const CONTENT_VERSION='166-20261111-repl8-v2';
+const CONTENT_VERSION='166-20261111-mobile-recovery-v3';
 const apiPath=p=>'/api/file?pathname='+encodeURIComponent(p)+'&v='+CONTENT_VERSION;
 let catalog=null,manifest=null,bookIndex=0,pageIndex=0,sentenceIndex=0,paused=false;
 let speechRun=0;
@@ -145,13 +145,13 @@ function markWord(charIndex){
 }
 function stopSpeech(){
   speechRun++;
-  speechSynthesis.cancel();
+  try{if('speechSynthesis' in window && typeof speechSynthesis.cancel==='function')speechSynthesis.cancel()}catch(_){}
 }
 function voiceId(v){return v.voiceURI+"|"+v.name+"|"+v.lang}
 function chosenVoice(){return polishVoices.find(v=>voiceId(v)===selectedVoiceId)||null}
 function loadVoices(){
   if(!("speechSynthesis" in window)){$("voiceInfo").textContent="Przeglądarka nie obsługuje lektora";return}
-  polishVoices=speechSynthesis.getVoices().filter(v=>/^pl(?:-|$)/i.test(v.lang));
+  try{polishVoices=(typeof speechSynthesis.getVoices==="function"?speechSynthesis.getVoices():[]).filter(v=>/^pl(?:-|$)/i.test(v.lang))}catch(_){polishVoices=[]}
   const select=$("voiceSelect");
   select.innerHTML='<option value="">Automatyczny (polski)</option>';
   polishVoices.forEach(v=>{
@@ -167,6 +167,7 @@ function loadVoices(){
 }
 function speakCurrent(){
   if(!state.sentences.length)return;
+  if(!('speechSynthesis' in window)||typeof SpeechSynthesisUtterance==='undefined'){updateStatus('Lektor niedostępny na tym urządzeniu. Tekst pozostaje dostępny.');return}
   stopSpeech();const run=speechRun;paused=false;markSentence();
   const u=new SpeechSynthesisUtterance(state.sentences[sentenceIndex]);u.lang='pl-PL';u.rate=+$('speed').value;
   const voice=chosenVoice();if(voice)u.voice=voice;
@@ -182,18 +183,19 @@ function jumpTime(sec){if(!state.sentences.length)return;let idx=sentenceIndex,r
 function repeatBlock(){if(!state.meta.length)return;const b=state.meta[sentenceIndex]?.block;const idx=state.meta.findIndex(m=>m.block===b);if(idx>=0){sentenceIndex=idx;speakCurrent()}}
 $('prevPage').onclick=()=>loadPage(pageIndex-1);$('nextPage').onclick=()=>loadPage(pageIndex+1);
 $('pageInput').onchange=()=>loadPage((+$('pageInput').value||1)-1);
-$('play').onclick=()=>speechSynthesis.paused?speechSynthesis.resume():speakCurrent();
-$('pause').onclick=()=>{if(speechSynthesis.speaking&&!speechSynthesis.paused){speechSynthesis.pause();paused=true;updateStatus('Pauza')}else if(speechSynthesis.paused){speechSynthesis.resume();paused=false;updateStatus('Czytam')}};
+$('play').onclick=()=>{if('speechSynthesis' in window && speechSynthesis.paused)speechSynthesis.resume();else speakCurrent()};
+$('pause').onclick=()=>{if(!('speechSynthesis' in window))return;if(speechSynthesis.speaking&&!speechSynthesis.paused){speechSynthesis.pause();paused=true;updateStatus('Pauza')}else if(speechSynthesis.paused){speechSynthesis.resume();paused=false;updateStatus('Czytam')}};
 $('prevSentence').onclick=()=>jumpSentence(-1);$('nextSentence').onclick=()=>jumpSentence(1);$('back10').onclick=()=>jumpTime(-10);$('fwd10').onclick=()=>jumpTime(10);$('repeatBlock').onclick=repeatBlock;
-$('speed').onchange=()=>{if(speechSynthesis.speaking)speakCurrent()};
+$('speed').onchange=()=>{if('speechSynthesis' in window && speechSynthesis.speaking)speakCurrent()};
 $('voiceSelect').onchange=()=>{
   selectedVoiceId=$('voiceSelect').value;
   try{if(selectedVoiceId)localStorage.setItem(VOICE_KEY,selectedVoiceId);else localStorage.removeItem(VOICE_KEY)}catch(_){}
-  const wasSpeaking=speechSynthesis.speaking;
+  const wasSpeaking=('speechSynthesis' in window)&&speechSynthesis.speaking;
   stopSpeech();paused=false;
   if(wasSpeaking)speakCurrent();else updateStatus('Wybrano głos lektora');
 };
 $('voicePreview').onclick=()=>{
+  if(!('speechSynthesis' in window)||typeof SpeechSynthesisUtterance==='undefined'){updateStatus('Lektor niedostępny na tym urządzeniu');return}
   stopSpeech();paused=false;updateStatus('Odsłuch próbny');
   const run=speechRun;
   const sample=new SpeechSynthesisUtterance('Witaj! Posłuchaj, jak czytam podręcznik do geografii. Odkrywajmy razem świat.');
@@ -203,11 +205,21 @@ $('voicePreview').onclick=()=>{
   sample.onerror=()=>{if(run===speechRun)updateStatus('Nie udało się odtworzyć próbki')};
   speechSynthesis.speak(sample);
 };
-if('speechSynthesis' in window){loadVoices();speechSynthesis.addEventListener('voiceschanged',loadVoices)}
+// Inicjalizacja mowy nigdy nie może blokować odczytu podręcznika.
+function initSpeech(){
+  try{
+    if(!('speechSynthesis' in window)){$('voiceInfo').textContent='Lektor niedostępny na tym urządzeniu';return}
+    loadVoices();
+    if(typeof speechSynthesis.addEventListener==='function')speechSynthesis.addEventListener('voiceschanged',loadVoices);
+    else speechSynthesis.onvoiceschanged=loadVoices;
+  }catch(_){$('voiceInfo').textContent='Nie udało się pobrać głosów, tekst pozostaje dostępny'}
+}
 $('dysBtn').onclick=()=>document.body.classList.toggle('dyslexic');
 function hold(id,fn){let t,l;const e=$(id);const start=x=>{x.preventDefault();t=setTimeout(()=>l=setInterval(fn,260),450)};const stop=()=>{clearTimeout(t);clearInterval(l)};e.addEventListener('pointerdown',start);['pointerup','pointerleave','pointercancel'].forEach(v=>e.addEventListener(v,stop))}
 hold('back10',()=>jumpTime(-10));hold('fwd10',()=>jumpTime(10));
-window.addEventListener('beforeunload',stopSpeech);init();
+window.addEventListener('beforeunload',stopSpeech);
+init();
+initSpeech();
 </script>
 </body>
 </html>
