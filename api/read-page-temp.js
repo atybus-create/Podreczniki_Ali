@@ -27,5 +27,10 @@ export default async function handler(req,res){
   if(!result || result.statusCode !== 200) return res.status(404).json({error:'Not found'});
   const buf = await streamToBuffer(result.stream);
   res.setHeader('Cache-Control','no-store');
+  if(String(req.query.raw||'')==='1'){
+    res.setHeader('Content-Type',result.blob.contentType||'image/jpeg');
+    res.setHeader('Content-Length',String(buf.length));
+    return res.status(200).send(buf);
+  }
   return res.status(200).json({page:id,contentType:result.blob.contentType||'image/jpeg',size:buf.length,contentBase64:buf.toString('base64')});
 }
