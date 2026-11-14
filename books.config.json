@@ -5,6 +5,11 @@
       "title": "Geografia — Planeta Nowa 5",
       "sourceBase": "https://flipbook.nowaera.pl/dokumenty/Flipbook/Geografia-Planeta-nowa-podrecznik%5Bkl_5%5D%5Bpr_2021%5D",
       "maxPages": 240
+    },
+    {
+      "id": "historia-5",
+      "title": "Historia 5",
+      "preloaded": true
     }
   ]
 }
