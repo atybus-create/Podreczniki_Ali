@@ -1,0 +1,51 @@
+name: Temp Historia 191-221 import and verify
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/historia-191-221-import.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  import_verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: qa-historia-191-221
+      - name: Import 191-221
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p qa/historia-191-221
+          curl -fsS --retry 5 "https://podrecznikiali.vercel.app/api/import-historia-temp?mode=import" > qa/historia-191-221/import.json
+      - name: Verify 31 JSON files
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > qa/historia-191-221/verify.jsonl
+          ok=0
+          for p in $(seq 191 221); do
+            tmp="/tmp/$p.json"
+            code=$(curl -sS -o "$tmp" -w "%{http_code}" -G --data-urlencode "pathname=books/historia-5/text/$p.json" "https://podrecznikiali.vercel.app/api/file")
+            valid=false
+            if [ "$code" = "200" ] && jq -e --argjson p "$p" '.bookId=="historia-5" and .sourcePage==$p and (.text|type=="string" and length>0) and (.paragraphs|type=="array" and length>0)' "$tmp" >/dev/null; then
+              valid=true
+              ok=$((ok+1))
+            fi
+            jq -nc --argjson page "$p" --arg code "$code" --argjson valid "$valid" --slurpfile data "$tmp" '{page:$page,http:($code|tonumber),valid:$valid,bookId:($data[0].bookId//null),sourcePage:($data[0].sourcePage//null),textChars:(($data[0].text//"")|length),paragraphs:(($data[0].paragraphs//[])|length)}' >> qa/historia-191-221/verify.jsonl
+          done
+          jq -s --argjson ok "$ok" '{ok:($ok==31),validCount:$ok,total:31,pages:.}' qa/historia-191-221/verify.jsonl > qa/historia-191-221/verify.json
+          test "$ok" -eq 31
+      - name: Commit reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add qa/historia-191-221/import.json qa/historia-191-221/verify.json qa/historia-191-221/verify.jsonl
+          git commit -m "Temporary import verification Historia 191-221"
+          git push origin HEAD:qa-historia-191-221
