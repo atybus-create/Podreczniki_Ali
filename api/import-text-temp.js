@@ -97,7 +97,7 @@ const DATA=[
 'Faraon sprawował nieograniczoną władzę. Miał prawo decydowania o życiu i śmierci wszystkich mieszkańców Egiptu. Jeśli kazał zabić niewinnego człowieka, nie ponosił za to kary. Do niego należała cała ziemia w państwie – chłopi ją tylko uprawiali. Egipcjanie uważali go za syna boga słońca Ra albo Re. Wierzyli, że po śmierci sam staje się bogiem.',
 'Faraon Ramzes II na rydwanie prowadzi Egipcjan do ataku na nieprzyjacielską twierdzę. Kopia malowidła ściennego z XIII w. p.n.e.',
 'Starożytny Egipt. Mapa przedstawia tereny uprawne, pustynie, oazy, piramidy i świątynie.',
-'Egipcjanie nie zapisywali samogłosek. Dlatego nie wiadomo, czy bóg słońca nosił imię Ra czy Re. A może Rrraeoyu?'
+'Egipcjanie nie zapisywali samogłosek. Dlatego nie wiadomo, czy bóg słońca nosił imię Ra czy Re. A może Rrraeoyiu?'
 ]},
 {n:24,title:'Infografika. Czym był Nil dla Egiptu?',p:[
 'Infografika. Czym był Nil dla Egiptu?',
@@ -111,7 +111,6 @@ const DATA=[
 '7. Łódź transportująca kamienne bloki.'
 ]},
 {n:25,title:'Infografika. Czym był Nil dla Egiptu? — ciąg dalszy',p:[
-'Infografika przedstawia życie nad Nilem: łodzie z trzciny, domy z suszonych cegieł, statek handlowy, pola, kanały nawadniające, piramidy oraz transport kamiennych bloków Nilem.',
 'Wyjaśnij, jaką rolę odgrywał Nil w życiu starożytnych Egipcjan.',
 'Wytłumacz, w jaki sposób Egipcjanie wykorzystywali Nil.'
 ]},
@@ -140,7 +139,7 @@ const DATA=[
 'To, co najważniejsze. Egipt – kraj w północno-wschodniej Afryce. Wylewy Nilu nawadniały ziemię i nanosiły żyzny muł, dlatego starożytny Egipt nazwano darem Nilu.',
 'Starożytne państwo egipskie, ok. 3100–30 p.n.e. Było monarchią rządzoną przez faraona. Faraon i jego urzędnicy: 1) organizowali pracę Egipcjan, 2) zapewniali im bezpieczeństwo, 3) rozsądzali spory.',
 'Faraon – król Egiptu. Uważany za syna boga słońca Ra. Miał prawo decydowania o życiu i śmierci wszystkich mieszkańców Egiptu. Posiadał całą ziemię w państwie. Był najwyższym dowódcą wojskowym, najwyższym sędzią i najwyższym kapłanem.',
-'Społeczeństwo egipskie można je przedstawić jako piramidę, na której szczycie stoi faraon, a niżej są kolejno: wezyr, kapłani, urzędnicy, m.in. pisarze, rzemieślnicy, żołnierze, chłopi i niewolnicy.',
+'Społeczeństwo egipskie. Można je przedstawić jako piramidę, na której szczycie stoi faraon, a niżej są kolejno: wezyr, kapłani, urzędnicy, m.in. pisarze, rzemieślnicy, żołnierze, chłopi i niewolnicy.',
 'Pismo egipskie: 1) hieroglify, 2) uproszczone pismo kapłańskie.'
 ]},
 {n:28,title:'5. Wierzenia starożytnych Egipcjan — egipscy bogowie',p:[
@@ -154,7 +153,7 @@ const DATA=[
 'Tot albo Thot – patron mądrości, bóg pisarzy i uczonych. Przedstawiano go jako mężczyznę z głową ptaka ibisa. Tak jak inni bogowie w lewej dłoni trzyma krzyż ankh, który oznaczał życie i nieśmiertelność, a w prawej berło uas, oznakę boskiej władzy.',
 'Anubis – bóg zmarłych i opiekun grobów. Ukazywany jako mężczyzna z głową szakala.',
 'Ozyrys – sędzia umarłych i władca ich krainy, bóg życia po śmierci. Ukazywany jako mężczyzna owinięty bandażami – tak jak mumie.',
-'Izyda – opiekunka rodziny, bogini magii, uzdrowicielka chorych. Pomagała rodzącym kobietom, często malowana i rzeźbiona z tronem na głowie przygotowanym dla faraona.'
+'Izyda – opiekunka rodzin, bogini magii, uzdrowicielka chorych. Pomagała rodzącym kobietom, często malowana i rzeźbiona z tronem na głowie przygotowanym dla faraona.'
 ]},
 {n:29,title:'Wierzenia starożytnych Egipcjan — piramidy i grobowce',p:[
 'Żeby zapewnić sobie przychylność bogów, Egipcjanie wznosili im kamienne świątynie i składali ofiary: żywność, wyroby rzemieślnicze oraz kosztowności. Wierzyli, że zadowolone bóstwa spowodują np. obfity wylew Nilu.',
@@ -191,7 +190,7 @@ export default async function handler(req,res){
       const id=String(item.n).padStart(3,'0');
       const data={bookId:'historia-5',sourcePage:item.n,title:item.title,text:item.p.join('\n\n'),paragraphs:item.p};
       const pathname=`books/historia-5/text/${id}.json`;
-      await put(pathname,JSON.stringify(data),{access:'private',addRandomSuffix:false,allowOverwrite:false,contentType:'application/json'});
+      await put(pathname,JSON.stringify(data),{access:'private',addRandomSuffix:false,allowOverwrite:true,contentType:'application/json'});
       written.push(pathname);
     }
     return res.status(200).json({ok:true,count:written.length,written});
