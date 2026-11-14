@@ -18,7 +18,7 @@ export default async function handler(req,res){
   if(req.headers['x-import-key']!==process.env.HISTORY_IMPORT_SECRET) return res.status(401).json({error:'Unauthorized'});
 
   const pathname=String(req.headers['x-blob-path']||'');
-  const isPage=/^books\/historia-5\/pages\/(00[1-9]|0[1-9]\d|1\d\d|2[01]\d|222)\.jpg$/.test(pathname);
+  const isPage=/^books\/historia-5\/pages\/(00[1-9]|0[1-9]\d|1\d\d|2[0-1]\d|22[0-2])\.jpg$/.test(pathname);
   const isManifest=pathname==='books/historia-5/manifest.json';
   if(!isPage && !isManifest) return res.status(400).json({error:'Invalid pathname'});
 
