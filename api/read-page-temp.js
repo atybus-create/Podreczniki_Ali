@@ -28,6 +28,10 @@ export default async function handler(req,res){
   if(!result || result.statusCode !== 200) return res.status(404).json({error:'Not found'});
   const buf = await streamToBuffer(result.stream);
   res.setHeader('Cache-Control','no-store');
+  if(String(req.query.tiny||'')==='1'){
+    const small=await sharp(buf).rotate().resize({width:850,withoutEnlargement:true}).jpeg({quality:68}).toBuffer();
+    return res.status(200).json({page:id,contentType:'image/jpeg',size:small.length,contentBase64:small.toString('base64')});
+  }
   if(String(req.query.thumb||'')==='1'){
     const small=await sharp(buf).rotate().resize({width:1400,withoutEnlargement:true}).jpeg({quality:82}).toBuffer();
     return res.status(200).json({page:id,contentType:'image/jpeg',size:small.length,contentBase64:small.toString('base64')});
