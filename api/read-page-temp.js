@@ -8,7 +8,7 @@ export default async function handler(req,res){
  const result=await get(`books/historia-5/pages/${id}.jpg`,{access:'private'});
  if(!result||result.statusCode!==200)return res.status(404).end();
  const buf=await streamToBuffer(result.stream);
- const small=await sharp(buf).rotate().resize({width:850,withoutEnlargement:true}).jpeg({quality:68}).toBuffer();
+ const n=Number(id); const img=sharp(buf).rotate(); if(n>=60) img.rotate(180); const small=await img.resize({width:850,withoutEnlargement:true}).jpeg({quality:68}).toBuffer();
  res.setHeader('Cache-Control','no-store');
  return res.status(200).json({page:id,contentBase64:small.toString('base64')});
 }
