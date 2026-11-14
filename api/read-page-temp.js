@@ -1,4 +1,5 @@
 import { get } from '@vercel/blob';
+import sharp from 'sharp';
 
 const KEY = 'hist-read-016-030-20261114-Q7m4K9';
 const ALLOWED = new Set(['016','017','018','019','020','021','022','023','024','025','026','027','028','029','030']);
@@ -27,6 +28,10 @@ export default async function handler(req,res){
   if(!result || result.statusCode !== 200) return res.status(404).json({error:'Not found'});
   const buf = await streamToBuffer(result.stream);
   res.setHeader('Cache-Control','no-store');
+  if(String(req.query.thumb||'')==='1'){
+    const small=await sharp(buf).rotate().resize({width:1400,withoutEnlargement:true}).jpeg({quality:82}).toBuffer();
+    return res.status(200).json({page:id,contentType:'image/jpeg',size:small.length,contentBase64:small.toString('base64')});
+  }
   if(String(req.query.raw||'')==='1'){
     res.setHeader('Content-Type',result.blob.contentType||'image/jpeg');
     res.setHeader('Content-Length',String(buf.length));
