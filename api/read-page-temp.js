@@ -11,5 +11,6 @@ export default async function handler(req,res){
  const image=sharp(buf);
  const small=await (id==='072'?image.rotate(180):image.rotate()).resize({width:850,withoutEnlargement:true}).jpeg({quality:68}).toBuffer();
  res.setHeader('Cache-Control','no-store');
+ if(String(req.query.raw||'')==='1') { res.setHeader('Content-Type','image/jpeg'); return res.status(200).send(small); }
  return res.status(200).json({page:id,contentBase64:small.toString('base64')});
 }
